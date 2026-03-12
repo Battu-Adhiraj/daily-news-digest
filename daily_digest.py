@@ -94,20 +94,31 @@ class AINewsletterEditor:
         
         date_str = datetime.now().strftime("%A, %B %d, %Y")
         
-        master_prompt = f"""
-        You are an expert, calming, and objective newsletter editor. Your goal is to keep the reader informed without causing them stress. 
-        I am going to provide you with a raw data dump of today's YouTube transcripts from their favorite channels, top RSS news articles, and trending Reddit posts.
+       master_prompt = f"""
+        You are an expert, calming, and highly objective executive assistant. Your goal is to keep the reader informed during their lunch break without causing them any stress or anxiety. 
 
-        Your task is to write a cohesive, engaging, and highly readable daily digest email. 
-        - Cross-reference the information! If a YouTube video talks about a topic that is also in the news, synthesize them into one cohesive summary.
-        - Filter out all sponsorship reads, clickbait, sensationalism, and extreme political rhetoric. Focus on factual events.
-        - Organize the newsletter logically. You don't have to list every single video or article if they are redundant or spammy. 
+        I am providing you with a raw data dump of today's YouTube transcripts, top RSS news articles, and trending Reddit posts.
 
-        OUTPUT FORMAT:
-        You must output ONLY valid, beautifully styled HTML code. Do not use markdown blocks like ```html. 
-        Start directly with <html> and end with </html>.
-        Use a clean, modern email design with inline CSS. Use Georgia or a similar readable serif font. Make sure links to the original videos/articles are clearly clickable.
-        Include a header that says "🧠 Your AI Daily Digest" and today's date: {date_str}.
+        Your task is to write a cohesive, engaging, and mobile-friendly daily digest email. 
+
+        RULES FOR TONE AND CONTENT:
+        1. Keep the tone completely neutral, factual, and grounded. 
+        2. Actively remove sensationalist adjectives.
+        3. Filter out all sponsorship reads, clickbait, and extreme political rhetoric.
+        4. Cross-reference the facts. If a YouTube video and a news article discuss the same event, combine them into one clear summary.
+
+        RULES FOR FORMATTING (CRITICAL FOR MOBILE PHONES):
+        - Output ONLY valid, clean HTML code starting with <html> and ending with </html>. Do not use markdown blocks like ```html.
+        - Use a clean, modern email design with inline CSS. Use Georgia or a similar readable serif font. 
+        - Ensure text is large enough for a phone screen (font-size: 16px for body text, 1.6 line-height).
+        - Use short bullet points instead of long paragraphs. 
+        - Make sure links to the original videos/articles are clearly clickable.
+
+        STRUCTURE THE EMAIL EXACTLY LIKE THIS:
+        - Header: "🧠 Your AI Daily Digest" and today's date: {date_str}.
+        - Section 1: "The Big Picture" (A calming, 2-sentence synthesis of the biggest factual themes of the day).
+        - Section 2: "📺 Your Channels" (Bulleted, 2-sentence factual summaries of the YouTube videos).
+        - Section 3: "🌍 Global Context & Tech" (Bulleted summaries of the most important News and Reddit posts).
 
         RAW DATA DUMP:
         ================
