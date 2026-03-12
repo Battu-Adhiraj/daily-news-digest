@@ -8,207 +8,169 @@ from datetime import datetime
 import feedparser
 import requests
 from googleapiclient.discovery import build
+import google.generativeai as genai
+from youtube_transcript_api import YouTubeTranscriptApi
 
 NEWS_SOURCES = {
     "BBC": "http://feeds.bbc.co.uk/news/rss.xml",
     "Reuters": "https://feeds.reuters.com/reuters/topNews",
     "AP News": "https://apnews.com/hub/ap-top-news/rss",
     "The Guardian": "https://www.theguardian.com/world/rss",
-    "Hacker News": "https://news.ycombinator.com/rss",
 }
+REDDIT_SUBREDDITS = ["news", "worldnews", "technology"]
 
-REDDIT_SUBREDDITS = ["news", "worldnews", "technology", "science"]
+class DataGatherer:
+    def __init__(self, youtube_api_key):
+        self.youtube = build('youtube', 'v3', developerKey=youtube_api_key)
 
-
-class YouTubeFetcher:
-    def __init__(self, api_key):
-        self.youtube = build('youtube', 'v3', developerKey=api_key)
-
-    def get_channel_videos(self, channel_id, max_results=3):
-        try:
-            channel = self.youtube.channels().list(
-                part='contentDetails', id=channel_id
-            ).execute()
-            if not channel['items']:
-                return []
-            uploads_id = channel['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-            videos = self.youtube.playlistItems().list(
-                part='snippet', playlistId=uploads_id, maxResults=max_results
-            ).execute()
-            results = []
-            for item in videos.get('items', []):
-                snippet = item['snippet']
-                pub_date = snippet['publishedAt'][:10]
-                # Only include videos published today or yesterday
-                results.append({
-                    'title': snippet['title'],
-                    'channel': snippet['channelTitle'],
-                    'url': f"https://www.youtube.com/watch?v={snippet['resourceId']['videoId']}",
-                    'published': pub_date,
-                    'description': snippet['description'][:300]
-                })
-            return results
-        except Exception as e:
-            print(f"Error fetching channel {channel_id}: {e}")
-            return []
-
-
-class NewsFetcher:
-    @staticmethod
-    def get_rss_news(sources, max_items=5):
-        all_news = []
-        for source_name, feed_url in sources.items():
+    def get_youtube_data(self, channel_ids, max_results=2):
+        print("📺 Gathering YouTube Transcripts...")
+        yt_data = []
+        for channel_id in channel_ids:
             try:
-                feed = feedparser.parse(feed_url)
-                for entry in feed.entries[:max_items]:
-                    all_news.append({
-                        'source': source_name,
-                        'title': entry.get('title', 'No title'),
-                        'url': entry.get('link', '#'),
-                        'summary': entry.get('summary', '')[:300],
-                    })
+                channel = self.youtube.channels().list(part='contentDetails', id=channel_id).execute()
+                if not channel['items']: continue
+                uploads_id = channel['items'][0]['contentDetails']['relatedPlaylists']['uploads']
+                videos = self.youtube.playlistItems().list(part='snippet', playlistId=uploads_id, maxResults=max_results).execute()
+                
+                for item in videos.get('items', []):
+                    snippet = item['snippet']
+                    video_id = snippet['resourceId']['videoId']
+                    title = snippet['title']
+                    channel_name = snippet['channelTitle']
+                    url = f"https://www.youtube.com/watch?v={video_id}"
+                    
+                    # Try to get transcript
+                    transcript_text = "(No transcript available. Use title to infer context.)"
+                    try:
+                        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                        transcript = transcript_list.find_transcript(['en', 'hi', 'en-US', 'en-GB'])
+                        transcript_data = transcript.fetch()
+                        # Limit to first 10,000 characters per video to save processing time
+                        transcript_text = " ".join([chunk['text'] for chunk in transcript_data])[:10000] 
+                    except:
+                        pass
+                    
+                    yt_data.append(f"Video: {title}\nChannel: {channel_name}\nURL: {url}\nTranscript/Context: {transcript_text}\n---")
             except Exception as e:
-                print(f"Error fetching {source_name}: {e}")
-        return all_news
+                print(f"Error fetching channel {channel_id}: {e}")
+        return "\n".join(yt_data)
 
-    @staticmethod
-    def get_reddit_trending(subreddits, max_posts=5):
-        posts = []
-        headers = {'User-Agent': 'DailyDigestBot/1.0'}
-        for subreddit in subreddits:
+    def get_news_data(self):
+        print("📰 Gathering News...")
+        news_data = []
+        for source, url in NEWS_SOURCES.items():
             try:
-                url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit={max_posts}"
-                response = requests.get(url, headers=headers, timeout=10)
-                data = response.json()
-                for post in data['data']['children']:
+                feed = feedparser.parse(url)
+                for entry in feed.entries[:3]:
+                    news_data.append(f"Source: {source}\nHeadline: {entry.get('title', '')}\nSummary: {entry.get('summary', '')}\nURL: {entry.get('link', '')}\n---")
+            except: pass
+        return "\n".join(news_data)
+
+    def get_reddit_data(self):
+        print("💬 Gathering Reddit...")
+        reddit_data = []
+        headers = {'User-Agent': 'DailyDigestBot/1.0'}
+        for sub in REDDIT_SUBREDDITS:
+            try:
+                url = f"https://www.reddit.com/r/{sub}/hot.json?limit=3"
+                res = requests.get(url, headers=headers, timeout=10).json()
+                for post in res['data']['children']:
                     p = post['data']
                     if not p.get('stickied'):
-                        posts.append({
-                            'source': f"r/{subreddit}",
-                            'title': p['title'],
-                            'url': f"https://reddit.com{p['permalink']}",
-                            'score': p['score'],
-                            'comments': p['num_comments']
-                        })
-            except Exception as e:
-                print(f"Error fetching r/{subreddit}: {e}")
-        return posts
+                        reddit_data.append(f"Subreddit: r/{sub}\nTitle: {p['title']}\nScore: {p['score']}\nURL: https://reddit.com{p['permalink']}\n---")
+            except: pass
+        return "\n".join(reddit_data)
 
 
-class DigestGenerator:
-    @staticmethod
-    def generate_html(youtube_videos, news_items, reddit_posts):
+class AINewsletterEditor:
+    def __init__(self, gemini_api_key):
+        genai.configure(api_key=gemini_api_key)
+        # Gemini 1.5 Flash has a massive context window, perfect for reading all this data at once
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+
+    def generate_newsletter(self, youtube_raw, news_raw, reddit_raw):
+        print("🧠 Sending everything to Gemini API to write the newsletter...")
+        
         date_str = datetime.now().strftime("%A, %B %d, %Y")
-        html = f"""
-<html>
-<head>
-<style>
-  body {{ font-family: Georgia, serif; max-width: 700px; margin: auto; background: #f9f9f9; color: #222; }}
-  .header {{ background: #1a1a2e; color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }}
-  .header h1 {{ margin: 0; font-size: 28px; }}
-  .header p {{ margin: 5px 0 0; color: #aaa; }}
-  .section {{ background: white; margin: 10px 0; padding: 20px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }}
-  .section h2 {{ margin-top: 0; color: #1a1a2e; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px; }}
-  .item {{ margin: 14px 0; padding: 12px; background: #f4f4f8; border-radius: 6px; }}
-  .item a {{ color: #1a73e8; text-decoration: none; font-weight: bold; font-size: 15px; }}
-  .item a:hover {{ text-decoration: underline; }}
-  .meta {{ font-size: 12px; color: #888; margin-top: 4px; }}
-  .summary {{ font-size: 13px; color: #444; margin-top: 6px; }}
-  .footer {{ text-align: center; padding: 20px; color: #aaa; font-size: 12px; }}
-</style>
-</head>
-<body>
-  <div class="header">
-    <h1>📰 Your Daily Digest</h1>
-    <p>{date_str}</p>
-  </div>
-"""
-        # YouTube section
-        if youtube_videos:
-            html += '<div class="section"><h2>🎬 New from Your YouTube Channels</h2>'
-            for v in youtube_videos:
-                html += f"""
-      <div class="item">
-        <a href="{v['url']}">{v['title']}</a>
-        <div class="meta">{v['channel']} &bull; {v['published']}</div>
-        <div class="summary">{v['description']}</div>
-      </div>"""
-            html += '</div>'
+        
+        master_prompt = f"""
+        You are an expert, calming, and objective newsletter editor. Your goal is to keep the reader informed without causing them stress. 
+        I am going to provide you with a raw data dump of today's YouTube transcripts from their favorite channels, top RSS news articles, and trending Reddit posts.
 
-        # News section
-        if news_items:
-            html += '<div class="section"><h2>🌍 Top News</h2>'
-            for n in news_items:
-                html += f"""
-      <div class="item">
-        <a href="{n['url']}">{n['title']}</a>
-        <div class="meta">{n['source']}</div>
-        <div class="summary">{n['summary']}</div>
-      </div>"""
-            html += '</div>'
+        Your task is to write a cohesive, engaging, and highly readable daily digest email. 
+        - Cross-reference the information! If a YouTube video talks about a topic that is also in the news, synthesize them into one cohesive summary.
+        - Filter out all sponsorship reads, clickbait, sensationalism, and extreme political rhetoric. Focus on factual events.
+        - Organize the newsletter logically. You don't have to list every single video or article if they are redundant or spammy. 
 
-        # Reddit section
-        if reddit_posts:
-            html += '<div class="section"><h2>💬 Trending on Reddit</h2>'
-            for r in reddit_posts:
-                html += f"""
-      <div class="item">
-        <a href="{r['url']}">{r['title']}</a>
-        <div class="meta">{r['source']} &bull; ⬆ {r['score']} &bull; 💬 {r['comments']}</div>
-      </div>"""
-            html += '</div>'
+        OUTPUT FORMAT:
+        You must output ONLY valid, beautifully styled HTML code. Do not use markdown blocks like ```html. 
+        Start directly with <html> and end with </html>.
+        Use a clean, modern email design with inline CSS. Use Georgia or a similar readable serif font. Make sure links to the original videos/articles are clearly clickable.
+        Include a header that says "🧠 Your AI Daily Digest" and today's date: {date_str}.
 
-        html += '<div class="footer">Your automated daily digest &bull; Powered by GitHub Actions</div></body></html>'
-        return html
+        RAW DATA DUMP:
+        ================
+        [YOUTUBE DATA]
+        {youtube_raw}
 
+        [NEWS DATA]
+        {news_raw}
 
-class EmailSender:
-    @staticmethod
-    def send_email(recipient, subject, html_content, sender_email, password):
-        try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From'] = sender_email
-            msg['To'] = recipient
-            msg.attach(MIMEText(html_content, 'html'))
-            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-                server.login(sender_email, password)
-                server.sendmail(sender_email, recipient, msg.as_string())
-            print(f"✅ Email sent to {recipient}")
-        except Exception as e:
-            print(f"❌ Email failed: {e}")
-            raise
+        [REDDIT DATA]
+        {reddit_raw}
+        ================
+        """
+        
+        response = self.model.generate_content(master_prompt)
+        
+        # Clean up the output in case Gemini accidentally includes markdown formatting
+        html_output = response.text.strip()
+        if html_output.startswith("```html"):
+            html_output = html_output[7:]
+        if html_output.endswith("```"):
+            html_output = html_output[:-3]
+            
+        return html_output
 
+def send_email(recipient, subject, html_content, sender_email, password):
+    print("✉️  Sending the final HTML to your inbox...")
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = sender_email
+        msg['To'] = recipient
+        msg.attach(MIMEText(html_content, 'html'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(sender_email, password)
+            server.sendmail(sender_email, recipient, msg.as_string())
+        print("✅ Success! Email sent.")
+    except Exception as e:
+        print(f"❌ Email failed: {e}")
 
 def main():
     youtube_api_key = os.environ['YOUTUBE_API_KEY']
+    gemini_api_key = os.environ['GEMINI_API_KEY']
     sender_email = os.environ['SENDER_EMAIL']
     gmail_password = os.environ['GMAIL_PASSWORD']
     recipient_email = os.environ['RECIPIENT_EMAIL']
     youtube_channels = json.loads(os.environ['YOUTUBE_CHANNELS'])
 
-    print(f"🚀 Starting digest — {datetime.now()}")
+    print(f"🚀 Starting the Editor-in-Chief workflow — {datetime.now()}")
 
-    # YouTube
-    print("📺 Fetching YouTube videos...")
-    yt = YouTubeFetcher(youtube_api_key)
-    all_videos = []
-    for channel_id in youtube_channels:
-        all_videos.extend(yt.get_channel_videos(channel_id, max_results=3))
+    # 1. Gather all the raw data
+    gatherer = DataGatherer(youtube_api_key)
+    youtube_text = gatherer.get_youtube_data(youtube_channels)
+    news_text = gatherer.get_news_data()
+    reddit_text = gatherer.get_reddit_data()
 
-    # News
-    print("📰 Fetching news...")
-    news = NewsFetcher.get_rss_news(NEWS_SOURCES, max_items=5)
-    reddit = NewsFetcher.get_reddit_trending(REDDIT_SUBREDDITS, max_posts=5)
+    # 2. Hand it all to Gemini
+    editor = AINewsletterEditor(gemini_api_key)
+    final_html_email = editor.generate_newsletter(youtube_text, news_text, reddit_text)
 
-    # Generate & send
-    print("✉️  Generating and sending email...")
-    html = DigestGenerator.generate_html(all_videos, news, reddit)
-    subject = f"📰 Daily Digest — {datetime.now().strftime('%B %d, %Y')}"
-    EmailSender.send_email(recipient_email, subject, html, sender_email, gmail_password)
-
-    print("✅ Done!")
-
+    # 3. Send the generated HTML
+    subject = f"🧠 AI Daily Digest — {datetime.now().strftime('%B %d, %Y')}"
+    send_email(recipient_email, subject, final_html_email, sender_email, gmail_password)
 
 if __name__ == '__main__':
     main()
