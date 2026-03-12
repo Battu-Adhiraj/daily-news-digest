@@ -86,9 +86,9 @@ class DataGatherer:
 class AINewsletterEditor:
     def __init__(self, gemini_api_key):
         genai.configure(api_key=gemini_api_key)
-        # Gemini 1.5 Flash has a massive context window, perfect for reading all this data at once
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
-
+        # Upgraded to the new Gemini 3 Flash model!
+        self.model = genai.GenerativeModel('gemini-3-flash-preview')
+        
     def generate_newsletter(self, youtube_raw, news_raw, reddit_raw):
         print("🧠 Sending everything to Gemini API to write the newsletter...")
         
