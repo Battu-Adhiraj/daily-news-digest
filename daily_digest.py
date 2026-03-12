@@ -212,14 +212,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-```
-
----
-
-### File 2: `requirements.txt`
-```
-google-api-python-client==2.100.0
-google-auth-httplib2==0.2.0
-google-auth-oauthlib==1.2.0
-feedparser==6.0.10
-requests==2.31.0
