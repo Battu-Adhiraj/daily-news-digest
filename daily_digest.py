@@ -94,7 +94,7 @@ class AINewsletterEditor:
         
         date_str = datetime.now().strftime("%A, %B %d, %Y")
         
-       master_prompt = f"""
+        master_prompt = f"""
         You are an expert, calming, and highly objective executive assistant. Your goal is to keep the reader informed during their lunch break without causing them any stress or anxiety. 
 
         I am providing you with a raw data dump of today's YouTube transcripts, top RSS news articles, and trending Reddit posts.
